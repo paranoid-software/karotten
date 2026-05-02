@@ -35,14 +35,18 @@ Routing key always has **three segments**, all derived from
 Docker-level metadata only — the body is never parsed:
 
 ```
-<project>.<container_name>.<stream>
+<project>.<service>.<stream>
 ```
 
 | Segment | Source | Notes |
 |---|---|---|
 | `project` | `com.docker.compose.project` label | Falls back to `standalone` for non-compose containers. Any literal `.` becomes `-`. |
-| `container_name` | Docker container name | Any literal `.` becomes `-`. |
+| `service` | `com.docker.compose.service` label | Falls back to the Docker container name when the container wasn't started by compose. Any literal `.` becomes `-`. |
 | `stream` | Docker stdio stream | `stdout` or `stderr`. |
+
+Replicas of the same service share the routing key — the `container_id`
+and `container_name` fields in the body let consumers tell them apart
+when needed.
 
 ## Message body
 
@@ -52,7 +56,8 @@ JSON envelope with these fields:
 |---|---|---|
 | `timestamp` | RFC 3339 nano string | When `karotten` saw the line. |
 | `project` | string | Same as routing-key segment. |
-| `container_name` | string | Same as routing-key segment. |
+| `service` | string | Same as routing-key segment. |
+| `container_name` | string | Docker container name (e.g. `my-looky-app-1`). Useful to differentiate replicas. |
 | `container_id` | string | Short (12-char) Docker container ID. |
 | `image` | string | Image reference of the container. |
 | `stream` | string | `stdout` or `stderr`. |

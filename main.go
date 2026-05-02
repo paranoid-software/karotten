@@ -2,7 +2,7 @@
 //
 // Listens to every running container's stdout/stderr via the Docker
 // Engine HTTP API and publishes each line to RabbitMQ on a topic
-// exchange. Routing key shape: <project>.<container_name>.<stream>.
+// exchange. Routing key shape: <project>.<service>.<stream>.
 //
 // Talks to the Docker daemon over its unix socket using stdlib net/http;
 // no docker SDK dependency. Only attaches to containers in `running`
@@ -68,6 +68,7 @@ type message struct {
 type envelope struct {
 	Time          string `json:"timestamp"`
 	Project       string `json:"project"`
+	Service       string `json:"service"`
 	ContainerName string `json:"container_name"`
 	ContainerID   string `json:"container_id"`
 	Image         string `json:"image"`
@@ -414,8 +415,15 @@ func (s *shipper) streamContainer(ctx context.Context, id string) {
 	if project == "" {
 		project = "standalone"
 	}
+	service := info.Config.Labels["com.docker.compose.service"]
+	if service == "" {
+		// Container not started by compose. Fall back to the container
+		// name so the routing key still has a meaningful second segment.
+		service = name
+	}
 	nameSeg := strings.ReplaceAll(name, ".", "-")
 	projectSeg := strings.ReplaceAll(project, ".", "-")
+	serviceSeg := strings.ReplaceAll(service, ".", "-")
 
 	q := url.Values{}
 	q.Set("stdout", "1")
@@ -431,11 +439,12 @@ func (s *shipper) streamContainer(ctx context.Context, id string) {
 	}
 	defer resp.Body.Close()
 
-	log.Printf("attached %s/%s (%s)", projectSeg, nameSeg, short(id))
-	defer log.Printf("detached %s/%s", projectSeg, nameSeg)
+	log.Printf("attached %s/%s (%s)", projectSeg, serviceSeg, short(id))
+	defer log.Printf("detached %s/%s", projectSeg, serviceSeg)
 
 	common := envelope{
 		Project:       projectSeg,
+		Service:       serviceSeg,
 		ContainerName: nameSeg,
 		ContainerID:   short(id),
 		Image:         info.Config.Image,
@@ -452,7 +461,7 @@ func (s *shipper) streamContainer(ctx context.Context, id string) {
 // Treat everything as stdout.
 func (s *shipper) consumeTTY(ctx context.Context, r io.Reader, common envelope) {
 	common.Stream = "stdout"
-	rk := common.Project + "." + common.ContainerName + ".stdout"
+	rk := common.Project + "." + common.Service + ".stdout"
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 4096), maxLineBytes)
 	for sc.Scan() && ctx.Err() == nil {
@@ -517,7 +526,7 @@ func newLineBuffer(s *shipper, common envelope, stream string) *lineBuffer {
 	return &lineBuffer{
 		shipper: s,
 		common:  common,
-		rk:      common.Project + "." + common.ContainerName + "." + stream,
+		rk:      common.Project + "." + common.Service + "." + stream,
 	}
 }
 
