@@ -6,3 +6,7 @@
 .vscode/
 .DS_Store
 *.swp
+
+.env
+
+karotten-*
